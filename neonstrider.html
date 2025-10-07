@@ -1,0 +1,876 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Neon Strider — Futuristic Platformer</title>
+<style>
+  :root {
+    --bg1: #0b0f1a;
+    --bg2: #0e1830;
+    --accent: #39ffe4;
+    --accent2: #ff2e72;
+    --accent3: #78a6ff;
+    --grid: #14223e;
+    --hud: #9ad6ff;
+    --shadow: rgba(0,0,0,0.5);
+  }
+  html, body {
+    height: 100%;
+    margin: 0;
+    background: radial-gradient(1200px 600px at 50% 80%, var(--bg2), var(--bg1));
+    color: #e6f2ff;
+    font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, "Helvetica Neue", Arial, sans-serif;
+    overflow: hidden;
+  }
+  #wrapper {
+    display: grid;
+    grid-template-rows: auto 1fr;
+    height: 100%;
+  }
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 14px;
+    background: linear-gradient(to right, rgba(12, 18, 32, 0.7), rgba(12, 18, 32, 0.2));
+    border-bottom: 1px solid #12233d;
+  }
+  header .title {
+    display: flex; align-items: center; gap: 10px;
+    font-weight: 700; letter-spacing: 0.3px;
+  }
+  .chip {
+    border: 1px solid #223b66;
+    color: var(--hud);
+    padding: 4px 8px;
+    border-radius: 14px;
+    font-size: 12px;
+    backdrop-filter: blur(2px);
+  }
+  #hud {
+    display: flex; align-items: center; gap: 12px;
+  }
+  #container {
+    position: relative;
+    height: calc(100vh - 56px);
+  }
+  #game {
+    display: block;
+    width: 100%;
+    height: 100%;
+    image-rendering: optimizeSpeed;
+  }
+  #overlay {
+    position: absolute; inset: 0; pointer-events: none;
+  }
+  .dialog {
+    position: absolute;
+    left: 50%; top: 50%;
+    transform: translate(-50%, -50%);
+    background: rgba(10,16,28,0.85);
+    border: 1px solid #1b2e50;
+    border-radius: 12px;
+    padding: 16px 18px;
+    width: min(520px, 90vw);
+    box-shadow: 0 10px 30px var(--shadow);
+    pointer-events: auto;
+  }
+  .dialog h2 {
+    margin: 0 0 10px; font-size: 20px; letter-spacing: 0.2px;
+    color: var(--accent3);
+  }
+  .dialog p { margin: 6px 0 10px; color: #cfe4ff; }
+  .btn-row { display: flex; gap: 10px; margin-top: 10px; }
+  .btn {
+    border: 1px solid #23406f;
+    background: linear-gradient(to bottom, #11223e, #0f1f36);
+    color: #cfe4ff;
+    padding: 8px 12px; border-radius: 8px; cursor: pointer;
+  }
+  .btn.primary {
+    border-color: #3a74ff;
+    color: white;
+    background: linear-gradient(to bottom, #2a56c7, #1f3f93);
+    box-shadow: inset 0 0 0 1px #7ea7ff;
+  }
+  .kbd {
+    border: 1px solid #2b446d; border-radius: 6px; padding: 1px 6px; font-size: 12px;
+    color: #cfe4ff; background: rgba(16,28,48,0.8);
+  }
+  footer {
+    position: absolute; left: 12px; bottom: 12px;
+    color: #98c8ff; font-size: 12px;
+    opacity: 0.9;
+    pointer-events: none;
+    text-shadow: 0 2px 6px rgba(0,0,0,0.3);
+  }
+</style>
+</head>
+<body>
+<div id="wrapper">
+  <header>
+    <div class="title">
+      <svg width="28" height="28" viewBox="0 0 32 32" fill="none">
+        <path d="M7 22L16 5l9 17" stroke="#39ffe4" stroke-width="2" />
+        <circle cx="16" cy="24" r="3" stroke="#ff2e72" stroke-width="2"/>
+      </svg>
+      <div>Neon Strider</div>
+      <div class="chip">Futuristic platformer</div>
+    </div>
+    <div id="hud">
+      <div class="chip" id="chip-level">Level: 1</div>
+      <div class="chip" id="chip-score">Shards: 0</div>
+      <div class="chip" id="chip-health">Integrity: 100%</div>
+      <div class="chip" id="chip-energy">Energy: 100%</div>
+    </div>
+  </header>
+
+  <div id="container">
+    <canvas id="game"></canvas>
+    <div id="overlay"></div>
+    <footer>A/D or Arrow keys to move. Space to jump (double jump), Shift to dash, P to pause, R to restart.</footer>
+  </div>
+</div>
+
+<script>
+(() => {
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d');
+  const overlay = document.getElementById('overlay');
+
+  let W = canvas.clientWidth;
+  let H = canvas.clientHeight;
+
+  function resize() {
+    W = canvas.clientWidth;
+    H = canvas.clientHeight;
+    canvas.width = Math.floor(W * devicePixelRatio);
+    canvas.height = Math.floor(H * devicePixelRatio);
+    ctx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  // HUD
+  const chipLevel = document.getElementById('chip-level');
+  const chipScore = document.getElementById('chip-score');
+  const chipHealth = document.getElementById('chip-health');
+  const chipEnergy = document.getElementById('chip-energy');
+
+  // Input
+  const keys = { left: false, right: false, jump: false, dash: false, pause: false, restart: false };
+  let pressBuffer = { jump: false, dash: false, pause: false, restart: false };
+
+  const KEYMAP = {
+    ArrowLeft: 'left', ArrowRight: 'right', ArrowUp: 'jump', ArrowDown: null,
+    KeyA: 'left', KeyD: 'right', Space: 'jump', ShiftLeft: 'dash', ShiftRight: 'dash',
+    KeyP: 'pause', KeyR: 'restart'
+  };
+  window.addEventListener('keydown', e => {
+    const k = KEYMAP[e.code];
+    if (k) {
+      if ((k === 'jump' || k === 'dash' || k === 'pause' || k === 'restart') && !keys[k]) {
+        pressBuffer[k] = true;
+      }
+      keys[k] = true;
+      e.preventDefault();
+    }
+  });
+  window.addEventListener('keyup', e => {
+    const k = KEYMAP[e.code];
+    if (k) keys[k] = false;
+  });
+
+  // Camera
+  const camera = { x: 0, y: 0, scale: 1, shake: 0 };
+
+  // World constants
+  const GRAVITY = 2000;
+  const MAX_FALL = 1500;
+  const FRICTION = 0.86;
+  const AIR_DRAG = 0.985;
+  const TILE = 48;
+
+  // Player
+  const player = {
+    x: 100, y: 100,
+    w: 28, h: 36,
+    vx: 0, vy: 0,
+    speed: 360,
+    jumpForce: 760,
+    doubleJumpForce: 660,
+    onGround: false,
+    facing: 1,
+    health: 100,
+    energy: 100,
+    maxEnergy: 100,
+    score: 0,
+    canDouble: true,
+    dashCooldown: 0,
+    dashTimer: 0,
+    invuln: 0,
+    respawning: false
+  };
+
+  // Game state
+  let paused = false;
+  let win = false;
+  let levelIndex = 0;
+  let time = 0;
+  let last = performance.now();
+
+  // Utility
+  function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
+  function rectsOverlap(a, b) {
+    return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+  }
+  function lerp(a, b, t) { return a + (b - a) * t; }
+  function rnd(a, b) { return a + Math.random() * (b - a); }
+
+  // Level definition
+  // Types: block, moving, spike, shard, portal, drone(patrol), spring
+  const LEVELS = [
+    {
+      name: "Arrival",
+      start: { x: 120, y: 500 },
+      bounds: { w: 3000, h: 1600 },
+      bgTint: '#14223e',
+      platforms: [
+        // Ground floor
+        { type: 'block', x: 0, y: 580, w: 700, h: 40 },
+        { type: 'block', x: 700, y: 560, w: 300, h: 60 },
+        { type: 'block', x: 950, y: 540, w: 300, h: 60 },
+        { type: 'block', x: 1250, y: 520, w: 220, h: 60 },
+        { type: 'block', x: 1500, y: 500, w: 300, h: 60 },
+
+        // Upper path
+        { type: 'block', x: 350, y: 460, w: 160, h: 30 },
+        { type: 'block', x: 560, y: 420, w: 160, h: 30 },
+        { type: 'block', x: 780, y: 380, w: 160, h: 30 },
+        { type: 'block', x: 1020, y: 340, w: 180, h: 30 },
+
+        // Moving platform corridor
+        { type: 'moving', x: 1340, y: 350, w: 120, h: 20, ax: 1200, ay: 350, bx: 1700, by: 350, t: 4 },
+        { type: 'moving', x: 1700, y: 300, w: 120, h: 20, ax: 1700, ay: 300, bx: 1900, by: 420, t: 3.5 },
+        { type: 'block', x: 1900, y: 470, w: 160, h: 30 },
+        { type: 'block', x: 2080, y: 430, w: 160, h: 30 },
+
+        // Hazards
+        { type: 'spike', x: 850, y: 570, w: 120, h: 30 },
+        { type: 'spike', x: 1180, y: 510, w: 70, h: 30 },
+        { type: 'spring', x: 1500, y: 470, w: 30, h: 30, force: 1000 },
+
+        // Portal area
+        { type: 'block', x: 2300, y: 400, w: 180, h: 30 },
+        { type: 'block', x: 2500, y: 360, w: 160, h: 30 },
+      ],
+      shards: [
+        { x: 620, y: 380 }, { x: 840, y: 340 }, { x: 1080, y: 300 },
+        { x: 1700, y: 270 }, { x: 2100, y: 400 }, { x: 2480, y: 320 }
+      ],
+      drones: [
+        { x: 980, y: 300, w: 28, h: 18, ax: 960, bx: 1160, speed: 120 },
+        { x: 2050, y: 380, w: 28, h: 18, ax: 1980, bx: 2200, speed: 140 }
+      ],
+      portal: { x: 2640, y: 320, w: 48, h: 80 }
+    },
+    {
+      name: "Skyway",
+      start: { x: 80, y: 520 },
+      bounds: { w: 3200, h: 1600 },
+      bgTint: '#102a54',
+      platforms: [
+        { type: 'block', x: 0, y: 580, w: 600, h: 40 },
+        { type: 'block', x: 650, y: 560, w: 280, h: 40 },
+        { type: 'block', x: 960, y: 540, w: 280, h: 40 },
+        { type: 'block', x: 1240, y: 520, w: 280, h: 40 },
+
+        // Vertical challenge with springs and spikes
+        { type: 'block', x: 300, y: 470, w: 140, h: 28 },
+        { type: 'block', x: 480, y: 430, w: 140, h: 28 },
+        { type: 'block', x: 660, y: 390, w: 140, h: 28 },
+        { type: 'spring', x: 820, y: 360, w: 28, h: 24, force: 1100 },
+        { type: 'block', x: 860, y: 310, w: 160, h: 28 },
+        { type: 'spike', x: 1040, y: 580, w: 100, h: 30 },
+        { type: 'spike', x: 1240, y: 500, w: 80, h: 30 },
+
+        // Moving platforms zigzag
+        { type: 'moving', x: 1420, y: 440, w: 120, h: 20, ax: 1320, ay: 440, bx: 1680, by: 370, t: 4.2 },
+        { type: 'moving', x: 1800, y: 350, w: 100, h: 18, ax: 1760, ay: 350, bx: 2000, by: 450, t: 3.8 },
+        { type: 'block', x: 2040, y: 500, w: 160, h: 30 },
+        { type: 'block', x: 2240, y: 460, w: 160, h: 30 },
+        { type: 'block', x: 2440, y: 420, w: 160, h: 30 },
+
+        // Portal ledge
+        { type: 'block', x: 3000, y: 360, w: 120, h: 30 },
+      ],
+      shards: [
+        { x: 340, y: 430 }, { x: 520, y: 390 }, { x: 700, y: 350 },
+        { x: 1480, y: 410 }, { x: 1820, y: 320 }, { x: 2460, y: 380 }, { x: 3020, y: 320 }
+      ],
+      drones: [
+        { x: 1100, y: 500, w: 28, h: 18, ax: 1040, bx: 1320, speed: 130 },
+        { x: 2100, y: 440, w: 28, h: 18, ax: 2060, bx: 2360, speed: 160 }
+      ],
+      portal: { x: 3120, y: 300, w: 48, h: 80 }
+    },
+    {
+      name: "Flux Tower",
+      start: { x: 90, y: 560 },
+      bounds: { w: 3000, h: 1600 },
+      bgTint: '#0f2446',
+      platforms: [
+        { type: 'block', x: 0, y: 600, w: 700, h: 40 },
+        { type: 'block', x: 840, y: 480, w: 160, h: 40 },
+        { type: 'block', x: 1040, y: 420, w: 160, h: 40 },
+        { type: 'block', x: 1240, y: 360, w: 160, h: 40 },
+        { type: 'moving', x: 1460, y: 320, w: 120, h: 20, ax: 1400, ay: 320, bx: 1680, by: 240, t: 4.5 },
+        { type: 'block', x: 1700, y: 280, w: 160, h: 40 },
+        { type: 'spike', x: 900, y: 560, w: 180, h: 30 },
+        { type: 'spring', x: 700, y: 560, w: 30, h: 30, force: 1150 },
+        { type: 'block', x: 2100, y: 260, w: 180, h: 40 },
+        { type: 'block', x: 2300, y: 220, w: 160, h: 40 },
+        { type: 'block', x: 2500, y: 180, w: 160, h: 40 },
+      ],
+      shards: [
+        { x: 880, y: 440 }, { x: 1080, y: 380 }, { x: 1280, y: 320 },
+        { x: 1500, y: 280 }, { x: 1720, y: 240 }, { x: 2320, y: 180 }, { x: 2520, y: 140 }
+      ],
+      drones: [
+        { x: 1500, y: 300, w: 28, h: 18, ax: 1440, bx: 1700, speed: 160 },
+        { x: 2200, y: 240, w: 28, h: 18, ax: 2120, bx: 2460, speed: 180 }
+      ],
+      portal: { x: 2660, y: 140, w: 48, h: 80 }
+    }
+  ];
+
+  // Runtime objects
+  let platforms = [];
+  let shards = [];
+  let drones = [];
+  let portal = null;
+  let levelBounds = { w: 2000, h: 1000 };
+  let bgTint = '#14223e';
+
+  function loadLevel(i) {
+    const L = LEVELS[i];
+    levelIndex = i;
+    player.x = L.start.x;
+    player.y = L.start.y;
+    player.vx = 0; player.vy = 0;
+    player.canDouble = true;
+    player.dashCooldown = 0; player.dashTimer = 0;
+    player.invuln = 0;
+    player.respawning = false;
+    if (i === 0) { player.score = 0; player.health = 100; player.energy = 100; win = false; }
+    platforms = JSON.parse(JSON.stringify(L.platforms));
+    shards = JSON.parse(JSON.stringify(L.shards));
+    drones = JSON.parse(JSON.stringify(L.drones));
+    portal = { ...L.portal };
+    levelBounds = { ...L.bounds };
+    bgTint = L.bgTint;
+    chipLevel.textContent = `Level: ${i + 1}`;
+    chipScore.textContent = `Shards: ${player.score}`;
+    chipHealth.textContent = `Integrity: ${Math.round(player.health)}%`;
+    chipEnergy.textContent = `Energy: ${Math.round(player.energy)}%`;
+  }
+  loadLevel(0);
+
+  // Physics and movement
+  function applyInput(dt) {
+    const accel = player.onGround ? player.speed : player.speed * 0.65;
+    if (keys.left) { player.vx = lerp(player.vx, -accel, player.onGround ? 0.3 : 0.08); player.facing = -1; }
+    if (keys.right) { player.vx = lerp(player.vx, +accel, player.onGround ? 0.3 : 0.08); player.facing = +1; }
+    if (!keys.left && !keys.right) {
+      player.vx *= player.onGround ? FRICTION : AIR_DRAG;
+      if (Math.abs(player.vx) < 2) player.vx = 0;
+    }
+
+    // Jump
+    if (pressBuffer.jump) {
+      if (player.onGround) {
+        player.vy = -player.jumpForce;
+        player.onGround = false;
+        player.canDouble = true;
+        camera.shake = 4;
+      } else if (player.canDouble) {
+        player.vy = -player.doubleJumpForce;
+        player.canDouble = false;
+        camera.shake = 3;
+      }
+      pressBuffer.jump = false;
+    }
+
+    // Dash
+    if (pressBuffer.dash && player.energy >= 20 && player.dashCooldown <= 0 && player.dashTimer <= 0) {
+      const dashSpeed = 900 * (player.onGround ? 1 : 0.9);
+      player.vx = player.facing * dashSpeed;
+      player.vy *= 0.4;
+      player.energy = Math.max(0, player.energy - 20);
+      player.dashTimer = 0.18;
+      player.dashCooldown = 0.8;
+      camera.shake = 8;
+      pressBuffer.dash = false;
+    }
+
+    // Cooldowns
+    if (player.dashCooldown > 0) player.dashCooldown -= dt;
+    if (player.dashTimer > 0) player.dashTimer -= dt;
+  }
+
+  function applyPhysics(dt) {
+    // Gravity
+    if (player.dashTimer <= 0) {
+      player.vy += GRAVITY * dt;
+      player.vy = clamp(player.vy, -Infinity, MAX_FALL);
+    } else {
+      // During dash, slight gravity
+      player.vy += (GRAVITY * 0.2) * dt;
+    }
+
+    // Move and collide
+    let px = player.x, py = player.y;
+    px += player.vx * dt;
+    py += player.vy * dt;
+
+    const playerRect = () => ({ x: px, y: py, w: player.w, h: player.h });
+
+    // Moving platforms update
+    platforms.forEach(p => {
+      if (p.type === 'moving') {
+        const t = (Math.sin((time / p.t) * Math.PI * 2) * 0.5 + 0.5);
+        p.x = lerp(p.ax, p.bx, t);
+        p.y = lerp(p.ay, p.by, t);
+      }
+    });
+
+    // Collision resolution
+    player.onGround = false;
+    for (const p of platforms) {
+      if (p.type === 'block' || p.type === 'moving') {
+        const r = { x: p.x, y: p.y, w: p.w, h: p.h };
+        const a = playerRect();
+        if (rectsOverlap(a, r)) {
+          const dx1 = (a.x + a.w) - r.x;
+          const dx2 = (r.x + r.w) - a.x;
+          const dy1 = (a.y + a.h) - r.y;
+          const dy2 = (r.y + r.h) - a.y;
+          const minX = Math.min(dx1, dx2);
+          const minY = Math.min(dy1, dy2);
+          if (minX < minY) {
+            // Resolve horizontally
+            if (dx1 < dx2) {
+              px = r.x - a.w;
+            } else {
+              px = r.x + r.w;
+            }
+            player.vx = 0;
+          } else {
+            // Resolve vertically
+            if (dy1 < dy2) {
+              py = r.y - a.h;
+              player.vy = 0;
+              player.onGround = true;
+              player.canDouble = true;
+              // Moving platform vertical carry
+              if (p.type === 'moving') {
+                const t = (Math.sin((time / p.t) * Math.PI * 2) * 0.5 + 0.5);
+                const prevX = lerp(p.ax, p.bx, t - 0.001);
+                const carry = (p.x - prevX) / 0.001;
+                px += carry * dt * 0.2; // slight carry
+              }
+            } else {
+              py = r.y + r.h;
+              player.vy = 20;
+            }
+          }
+        }
+      } else if (p.type === 'spike') {
+        const r = { x: p.x, y: p.y, w: p.w, h: p.h };
+        if (rectsOverlap(playerRect(), r)) {
+          damagePlayer(35);
+          camera.shake = 6;
+        }
+      } else if (p.type === 'spring') {
+        const r = { x: p.x, y: p.y, w: p.w, h: p.h };
+        if (rectsOverlap(playerRect(), r)) {
+          player.vy = -p.force;
+          player.onGround = false;
+          player.canDouble = true;
+          camera.shake = 5;
+        }
+      }
+    }
+
+    // Drones
+    drones.forEach(d => {
+      d.x += (d.speed * dt) * (d.dir || 1);
+      if (!d.dir) d.dir = 1;
+      if (d.x < d.ax) { d.x = d.ax; d.dir = 1; }
+      if (d.x > d.bx) { d.x = d.bx; d.dir = -1; }
+
+      const r = { x: d.x, y: d.y, w: d.w, h: d.h };
+      if (rectsOverlap(playerRect(), r)) {
+        damagePlayer(20);
+        // Slight knockback
+        player.vx += (player.x < d.x ? -1 : 1) * 280;
+        camera.shake = 4;
+      }
+    });
+
+    // Portal
+    if (rectsOverlap(playerRect(), portal)) {
+      if (shards.length === 0) {
+        nextLevel();
+        camera.shake = 3;
+      }
+    }
+
+    // Apply final
+    player.x = px; player.y = py;
+
+    // Bounds
+    player.x = clamp(player.x, -300, levelBounds.w - 20);
+    if (player.y > levelBounds.h + 200) {
+      respawn();
+    }
+
+    // Energy regen
+    player.energy = clamp(player.energy + dt * 12, 0, player.maxEnergy);
+    if (player.invuln > 0) player.invuln -= dt;
+  }
+
+  function damagePlayer(dmg) {
+    if (player.invuln > 0 || player.respawning) return;
+    player.health = Math.max(0, player.health - dmg);
+    player.invuln = 0.8;
+    if (player.health <= 0) {
+      respawn();
+    }
+  }
+
+  function respawn() {
+    if (player.respawning) return;
+    player.respawning = true;
+    camera.shake = 10;
+    setTimeout(() => {
+      const L = LEVELS[levelIndex];
+      player.x = L.start.x; player.y = L.start.y;
+      player.vx = 0; player.vy = 0;
+      player.health = Math.max(20, player.health); // keep some consequence
+      player.respawning = false;
+    }, 600);
+  }
+
+  function nextLevel() {
+    if (levelIndex + 1 < LEVELS.length) {
+      loadLevel(levelIndex + 1);
+    } else {
+      win = true;
+      showWinDialog();
+    }
+  }
+
+  function updateShards() {
+    // Collect
+    for (let i = shards.length - 1; i >= 0; i--) {
+      const s = shards[i];
+      const r = { x: s.x - 12, y: s.y - 12, w: 24, h: 24 };
+      const pr = { x: player.x, y: player.y, w: player.w, h: player.h };
+      if (rectsOverlap(pr, r)) {
+        shards.splice(i, 1);
+        player.score += 1;
+        player.energy = clamp(player.energy + 10, 0, player.maxEnergy);
+        camera.shake = 2;
+        chipScore.textContent = `Shards: ${player.score}`;
+      }
+    }
+  }
+
+  // Camera update
+  function updateCamera(dt) {
+    const targetX = clamp(player.x - W * 0.42, 0, Math.max(0, levelBounds.w - W));
+    const targetY = clamp(player.y - H * 0.48, 0, Math.max(0, levelBounds.h - H));
+    camera.x = lerp(camera.x, targetX, 0.12);
+    camera.y = lerp(camera.y, targetY, 0.12);
+    if (camera.shake > 0) camera.shake -= dt * 30;
+    camera.shake = Math.max(0, camera.shake);
+  }
+
+  // Rendering
+  function drawBackground() {
+    // Parallax grid + skyline
+    const g = ctx;
+    g.save();
+    g.translate(-camera.x * 0.2, -camera.y * 0.1);
+
+    // Skyline blocks
+    for (let i = 0; i < 10; i++) {
+      const x = i * 380 + Math.sin(time * 0.2 + i) * 40;
+      const h = 180 + Math.sin(i * 2) * 50;
+      g.fillStyle = i % 2 === 0 ? '#0e1a32' : '#0b1628';
+      g.fillRect(x, H - 140 - h, 220, h);
+      // Neon bands
+      g.globalAlpha = 0.8;
+      g.fillStyle = i % 2 === 0 ? '#112a54' : '#0f2346';
+      g.fillRect(x + 20, H - 80 - h, 180, 6);
+      g.globalAlpha = 1;
+    }
+
+    // Parallax grid
+    g.strokeStyle = bgTint;
+    g.lineWidth = 1;
+    g.globalAlpha = 0.6;
+    for (let y = 0; y < H; y += 40) {
+      g.beginPath();
+      g.moveTo(0, y);
+      g.lineTo(W * 2, y);
+      g.stroke();
+    }
+    for (let x = -W; x < W * 2; x += 60) {
+      g.beginPath();
+      g.moveTo(x, 0);
+      g.lineTo(x, H);
+      g.stroke();
+    }
+    g.globalAlpha = 1;
+    g.restore();
+
+    // Ambient neon haze
+    const grad = ctx.createLinearGradient(0, 0, 0, H);
+    grad.addColorStop(0, 'rgba(30,80,180,0.15)');
+    grad.addColorStop(1, 'rgba(255,60,140,0.10)');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, W, H);
+  }
+
+  function drawWorld() {
+    const g = ctx;
+    g.save();
+
+    // Camera transform + shake
+    const sx = (Math.random() - 0.5) * camera.shake;
+    const sy = (Math.random() - 0.5) * camera.shake;
+    g.translate(-Math.floor(camera.x) + sx, -Math.floor(camera.y) + sy);
+
+    // Platforms
+    platforms.forEach(p => {
+      if (p.type === 'block' || p.type === 'moving') {
+        // Base
+        g.fillStyle = '#12223d';
+        g.fillRect(p.x, p.y, p.w, p.h);
+        // Edge glow
+        g.fillStyle = '#21406f';
+        g.fillRect(p.x, p.y, p.w, 4);
+        g.fillStyle = '#0c182c';
+        g.fillRect(p.x, p.y + p.h - 3, p.w, 3);
+
+        // Futuristic stripes
+        g.fillStyle = 'rgba(57,255,228,0.20)';
+        g.fillRect(p.x + 10, p.y + 6, p.w - 20, 2);
+        g.fillStyle = 'rgba(120,166,255,0.12)';
+        g.fillRect(p.x + 10, p.y + p.h - 8, p.w - 20, 2);
+      } else if (p.type === 'spike') {
+        for (let x = p.x; x < p.x + p.w; x += 12) {
+          g.beginPath();
+          g.moveTo(x, p.y + p.h);
+          g.lineTo(x + 6, p.y);
+          g.lineTo(x + 12, p.y + p.h);
+          g.closePath();
+          g.fillStyle = '#ff2e72';
+          g.fill();
+          g.strokeStyle = 'rgba(255,46,114,0.4)';
+          g.stroke();
+        }
+      } else if (p.type === 'spring') {
+        g.fillStyle = '#3affd7';
+        g.fillRect(p.x, p.y, p.w, p.h);
+        g.fillStyle = '#0d2038';
+        g.fillRect(p.x + 3, p.y + 3, p.w - 6, p.h - 6);
+        g.strokeStyle = '#3affd7';
+        g.lineWidth = 2;
+        g.strokeRect(p.x + 4, p.y + 4, p.w - 8, p.h - 8);
+      }
+    });
+
+    // Drones
+    drones.forEach(d => {
+      g.save();
+      g.translate(d.x, d.y);
+      g.fillStyle = '#172a47';
+      g.fillRect(0, 0, d.w, d.h);
+      g.fillStyle = '#39ffe4';
+      g.fillRect(2, 4, d.w - 4, 3);
+      g.fillStyle = '#ff2e72';
+      g.fillRect(d.w - 6, 2, 4, 4);
+      g.restore();
+    });
+
+    // Shards
+    shards.forEach(s => {
+      g.save();
+      const pulse = Math.sin(time * 4 + s.x * 0.01) * 0.5 + 0.5;
+      g.translate(s.x, s.y);
+      g.rotate((time * 2 + s.x * 0.02) % (Math.PI * 2));
+      g.beginPath();
+      g.moveTo(0, -10);
+      g.lineTo(8, 0);
+      g.lineTo(0, 10);
+      g.lineTo(-8, 0);
+      g.closePath();
+      g.fillStyle = `rgba(57,255,228,${0.7 + 0.3 * pulse})`;
+      g.fill();
+      g.strokeStyle = 'rgba(120,166,255,0.8)';
+      g.lineWidth = 1.5;
+      g.stroke();
+      g.restore();
+    });
+
+    // Portal
+    g.save();
+    const pulse = Math.sin(time * 3) * 0.5 + 0.5;
+    g.fillStyle = 'rgba(120,166,255,0.15)';
+    g.fillRect(portal.x - 10, portal.y - 10, portal.w + 20, portal.h + 20);
+    g.fillStyle = '#78a6ff';
+    g.fillRect(portal.x, portal.y, portal.w, portal.h);
+    g.fillStyle = `rgba(57,255,228,${0.4 + pulse * 0.4})`;
+    g.fillRect(portal.x + 10, portal.y + 8, portal.w - 20, portal.h - 16);
+    g.restore();
+
+    // Player
+    drawPlayer(g);
+
+    g.restore();
+  }
+
+  function drawPlayer(g) {
+    g.save();
+    g.translate(player.x, player.y);
+
+    // Body
+    const glow = player.invuln > 0 ? '#ffd1e0' : '#39ffe4';
+    g.fillStyle = '#142640';
+    g.fillRect(0, 0, player.w, player.h);
+    // Visor
+    g.fillStyle = '#78a6ff';
+    g.fillRect(4, 6, player.w - 8, 8);
+    // Booster glow
+    g.fillStyle = glow;
+    g.globalAlpha = 0.4;
+    g.fillRect(player.facing > 0 ? player.w - 6 : 2, player.h - 10, 4, 8);
+    g.globalAlpha = 1;
+
+    // Dash trail
+    if (player.dashTimer > 0) {
+      g.fillStyle = 'rgba(57,255,228,0.25)';
+      for (let i = 0; i < 6; i++) {
+        g.fillRect(-i * player.facing * 6, 6, player.w - i * 2, player.h - 12);
+      }
+    }
+
+    // Feet indicator if grounded
+    if (player.onGround) {
+      g.fillStyle = 'rgba(120,166,255,0.5)';
+      g.fillRect(4, player.h - 3, player.w - 8, 2);
+    }
+
+    g.restore();
+  }
+
+  function drawHUD() {
+    chipHealth.textContent = `Integrity: ${Math.round(player.health)}%`;
+    chipEnergy.textContent = `Energy: ${Math.round(player.energy)}%`;
+  }
+
+  // Dialogs
+  function showPauseDialog() {
+    overlay.innerHTML = `
+      <div class="dialog">
+        <h2>Paused</h2>
+        <p>Neon currents on hold. Take a breath.</p>
+        <div class="btn-row">
+          <button class="btn primary" id="btn-resume">Resume <span class="kbd">P</span></button>
+          <button class="btn" id="btn-restart">Restart level <span class="kbd">R</span></button>
+        </div>
+      </div>
+    `;
+    const resume = document.getElementById('btn-resume');
+    const restart = document.getElementById('btn-restart');
+    resume.onclick = () => { paused = false; overlay.innerHTML = ''; };
+    restart.onclick = () => { loadLevel(levelIndex); paused = false; overlay.innerHTML = ''; };
+  }
+
+  function showWinDialog() {
+    overlay.innerHTML = `
+      <div class="dialog">
+        <h2>All systems: green</h2>
+        <p>You surfed the neon skyline and secured the flux shards. Stylish.</p>
+        <div class="btn-row">
+          <button class="btn primary" id="btn-again">Play again</button>
+        </div>
+      </div>
+    `;
+    document.getElementById('btn-again').onclick = () => {
+      loadLevel(0);
+      overlay.innerHTML = '';
+      win = false;
+    };
+  }
+
+  // Main loop
+  function tick() {
+    const now = performance.now();
+    const dt = clamp((now - last) / 1000, 0, 0.033);
+    last = now;
+    time += dt;
+
+    // Input one-shots
+    if (pressBuffer.pause) {
+      paused = !paused;
+      pressBuffer.pause = false;
+      if (paused) showPauseDialog(); else overlay.innerHTML = '';
+    }
+    if (pressBuffer.restart) {
+      loadLevel(levelIndex); overlay.innerHTML = ''; paused = false; pressBuffer.restart = false;
+    }
+
+    if (!paused && !win) {
+      applyInput(dt);
+      applyPhysics(dt);
+      updateShards();
+      updateCamera(dt);
+    }
+
+    // Render
+    ctx.clearRect(0, 0, W, H);
+    drawBackground();
+    drawWorld();
+    drawHUD();
+
+    requestAnimationFrame(tick);
+  }
+  tick();
+
+  // Focus prompt on start
+  setTimeout(() => {
+    overlay.innerHTML = `
+      <div class="dialog">
+        <h2>Welcome to Neon Strider</h2>
+        <p>Collect <span style="color:#39ffe4;font-weight:600;">quantum shards</span>, avoid hazards, and reach the portal. Chain jumps and dash to master momentum.</p>
+        <p><span class="kbd">A/D</span> or <span class="kbd">Arrow keys</span> to move, <span class="kbd">Space</span> to jump (double jump), <span class="kbd">Shift</span> to dash.</p>
+        <div class="btn-row">
+          <button class="btn primary" id="btn-start">Begin</button>
+          <button class="btn" id="btn-pause">Pause <span class="kbd">P</span></button>
+        </div>
+      </div>
+    `;
+    document.getElementById('btn-start').onclick = () => { overlay.innerHTML = ''; };
+    document.getElementById('btn-pause').onclick = () => { paused = true; showPauseDialog(); };
+  }, 100);
+
+})();
+</script>
+</body>
+</html>
+```
